@@ -1,2 +1,11 @@
 node_modules
 dist
+.antlr
+Python3Lexer.interp
+Python3Lexer.tokens
+Python3Lexer.ts
+Python3Parser.interp
+Python3Parser.tokens
+Python3Parser.ts
+Python3ParserListener.ts
+Python3ParserVisitor.ts
