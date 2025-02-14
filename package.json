@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "generate": "antlr4 -Dlanguage=TypeScript Python3Lexer.g4 Python3Parser.g4 -visitor -listener",
+    "gen": "antlr4 -Dlanguage=TypeScript Python3Lexer.g4 Python3Parser.g4"
   },
   "keywords": [],
   "author": "",
@@ -12,5 +14,8 @@
   "type": "commonjs",
   "dependencies": {
     "antlr4": "^4.13.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
   }
 }
