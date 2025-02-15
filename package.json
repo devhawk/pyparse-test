@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "generate": "antlr4 -Dlanguage=TypeScript Python3Lexer.g4 Python3Parser.g4 -visitor -no-listener"
+    "generate": "antlr4 -Dlanguage=TypeScript Python3Lexer.g4 Python3Parser.g4 -visitor -no-listener",
+    "prebuild": "npm run generate",
+    "build": "tsc --build"
   },
   "keywords": [],
   "author": "",
