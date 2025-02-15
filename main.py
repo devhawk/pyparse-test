@@ -68,7 +68,7 @@ def crash_application():
 
 
 @app.get("/")
-def readme():
+async def readme():
     with open(os.path.join("html", "app.html")) as file:
         html = file.read()
     return HTMLResponse(html)

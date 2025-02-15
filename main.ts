@@ -1,6 +1,6 @@
 import { CharStream, CommonTokenStream } from 'antlr4';
 import Python3Lexer from './Python3Lexer';
-import Python3Parser, { Import_fromContext, Import_nameContext } from './Python3Parser';
+import Python3Parser, { DecoratedContext, Import_fromContext, Import_nameContext } from './Python3Parser';
 import * as fs from 'node:fs/promises';
 import Python3ParserVisitor from './Python3ParserVisitor';
 
@@ -9,10 +9,18 @@ type AliasedName = {
     asName?: string;
 };
 
+type DecoratedFunction = {
+    name: string;
+    decorators: string[];
+    start: number;
+    stop: number;
+}
+
 class DbosPythonVisitor extends Python3ParserVisitor<void> {
 
     readonly nameImports = new Array<AliasedName>();
     readonly fromImports = new Map<string, Set<string>>();
+    readonly decoratedFunctions = new Array<DecoratedFunction>();
 
     visitImport_name = (ctx: Import_nameContext) => {
         const dansCtx = ctx.dotted_as_names();
@@ -41,6 +49,22 @@ class DbosPythonVisitor extends Python3ParserVisitor<void> {
             set.add(value);
         }
     }
+
+    visitDecorated =(ctx: DecoratedContext) => {
+        const func = ctx.funcdef() ?? ctx.async_funcdef().funcdef();
+        if (func) {
+            const start = ctx.start.start;
+            const stop = ctx.stop?.stop ?? ctx.start.stop;
+            const decorators = ctx.decorators().decorator_list().map(c => c.dotted_name().name_list().map(n => n.getText()).join('.'));
+            const name = func.name().getText();
+            this.decoratedFunctions.push({
+                decorators,
+                name,
+                start,
+                stop,
+            })
+        }
+    }
 }
 
 
@@ -54,6 +78,7 @@ async function main(filename: string) {
 
     const v = new DbosPythonVisitor();
     v.visit(tree);
+    console.log();
 }
 
 main("/home/harry/pyparse-test/main.py").catch(console.log);
