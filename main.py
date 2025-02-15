@@ -1,5 +1,6 @@
 import os
 import time
+import foo as bar
 
 from dbos import DBOS, SetWorkflowID, ConfigFile as cfgFile
 from fastapi import FastAPI

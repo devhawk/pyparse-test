@@ -9,6 +9,21 @@ type AliasedName = {
     asName?: string;
 };
 
+function parseAliasedName(name: string): AliasedName {
+    const pos = name.split('.');
+    if (pos.length === 1) {
+        return { name: pos[0] };
+    }
+    if (pos.length === 2) {
+        return { name: pos[0], asName: pos[1] };
+    }
+    throw new Error(`Invalid AliasedName ${name}`);
+}
+
+function composeAliasedName({ name, asName }: AliasedName) : string {
+    return asName ? `${name}.${asName}` : name;
+}
+
 type DecoratedFunction = {
     name: string;
     decorators: string[];
@@ -45,8 +60,7 @@ class DbosPythonVisitor extends Python3ParserVisitor<void> {
             this.fromImports.set(moduleName, set);
         }
         for (const name of names) {
-            const value = name.asName ? `${name.name}.${name.asName}` : name.name;
-            set.add(value);
+            set.add(composeAliasedName(name));
         }
     }
 
@@ -76,9 +90,33 @@ async function main(filename: string) {
     const parser = new Python3Parser(tokens);
     const tree = parser.file_input()
 
-    const v = new DbosPythonVisitor();
-    v.visit(tree);
-    console.log();
+    const visitor = new DbosPythonVisitor();
+    visitor.visit(tree);
+    
+    for (const n of visitor.nameImports) {
+        console.log(`import: ${asAliasedName(n)}`);
+    }
+    for (const [module, types] of visitor.fromImports) {
+        console.log(`import from: ${module}`);
+        for (const type of types) {
+            console.log(`\t${asAliasedName(parseAliasedName(type))}`);
+        }
+    }
+    for (const func of visitor.decoratedFunctions) {
+        console.log(`function ${func.name}`);
+        for (const dec of func.decorators) {
+            console.log(`\t${dec}`);
+        }
+
+    }
+
+    function asAliasedName({ name, asName }: AliasedName) {
+        if (asName) {
+            return `${name} as ${asName}`;
+        }
+        return name;
+
+    }
 }
 
 main("/home/harry/pyparse-test/main.py").catch(console.log);
