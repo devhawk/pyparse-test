@@ -1,9 +1,12 @@
 import os
 import time
-import foo as bar
 
-from dbos import DBOS, SetWorkflowID, ConfigFile as cfgFile
-from fastapi import FastAPI
+import dbos
+import dbos as fauxDbos
+
+from dbos import DBOS, SetWorkflowID
+from dbos import DBOS as FAUX_DBOS  
+
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
@@ -38,6 +41,24 @@ def background_task(n: int) -> None:
         background_task_step(i)
         DBOS.set_event(steps_event, i)
 
+@FAUX_DBOS.workflow()
+def background_task2(n: int) -> None:
+    for i in range(1, n + 1):
+        background_task_step(i)
+        DBOS.set_event(steps_event, i)
+
+
+@dbos.DBOS.workflow()
+def background_task3(n: int) -> None:
+    for i in range(1, n + 1):
+        background_task_step(i)
+        DBOS.set_event(steps_event, i)
+
+@fauxDbos.DBOS.workflow()
+def background_task4(n: int) -> None:
+    for i in range(1, n + 1):
+        background_task_step(i)
+        DBOS.set_event(steps_event, i)
 
 @DBOS.step()
 def background_task_step(i: int):

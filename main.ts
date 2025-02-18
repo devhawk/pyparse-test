@@ -1,82 +1,118 @@
-import { CharStream, CommonTokenStream } from 'antlr4';
+import { CharStream, CommonTokenStream, ParseTreeWalker  } from 'antlr4';
 import Python3Lexer from './Python3Lexer';
 import Python3Parser, { DecoratedContext, Import_fromContext, Import_nameContext } from './Python3Parser';
 import * as fs from 'node:fs/promises';
-import Python3ParserVisitor from './Python3ParserVisitor';
+// import Python3ParserVisitor from './Python3ParserVisitor';
+import Python3ParserListener from './Python3ParserListener';
+import { start } from 'node:repl';
+import { triggerAsyncId } from 'node:async_hooks';
+import { link } from 'node:fs';
 
 type AliasedName = {
-    name: string;
+    name: readonly string[];
     asName?: string;
 };
 
-function parseAliasedName(name: string): AliasedName {
-    const pos = name.split('.');
-    if (pos.length === 1) {
-        return { name: pos[0] };
-    }
-    if (pos.length === 2) {
-        return { name: pos[0], asName: pos[1] };
-    }
-    throw new Error(`Invalid AliasedName ${name}`);
-}
-
-function composeAliasedName({ name, asName }: AliasedName) : string {
-    return asName ? `${name}.${asName}` : name;
+type FromImport = {
+    module: readonly string[];
+    types: readonly AliasedName[];
 }
 
 type DecoratedFunction = {
     name: string;
-    decorators: string[];
+    decorators: string[][];
     start: number;
     stop: number;
 }
 
-class DbosPythonVisitor extends Python3ParserVisitor<void> {
+class DbosPythonListener extends Python3ParserListener {
 
     readonly nameImports = new Array<AliasedName>();
-    readonly fromImports = new Map<string, Set<string>>();
+    readonly fromImports = new Array<FromImport>();
     readonly decoratedFunctions = new Array<DecoratedFunction>();
 
-    visitImport_name = (ctx: Import_nameContext) => {
+    enterImport_name = (ctx: Import_nameContext) => {
         const dansCtx = ctx.dotted_as_names();
         for (const danCtx of dansCtx.dotted_as_name_list()) {
-            const name = danCtx.dotted_name().name_list().map(n => n.getText()).join('.');
+            const name = danCtx.dotted_name().name_list().map(n => n.getText());
             const asName = danCtx.name()?.getText();
-            this.nameImports.push({name, asName});
+            this.nameImports.push({ name, asName });
         }
     }
-
-    visitImport_from = (ctx: Import_fromContext) => {
-        const moduleName = ctx.dotted_name().name_list().map(n => n.getText()).join('.');
+    enterImport_from = (ctx: Import_fromContext) => {
+        const module = ctx.dotted_name().name_list().map(n => n.getText());
         const names = ctx.import_as_names().import_as_name_list().map(n => {
             const name = n.name_list()[0].getText();
             const asName = n.AS() ? n.name_list()[1].getText() : undefined;
-            return { name, asName }
+            return { name: [name], asName } as AliasedName
         })
+        this.fromImports.push({ module, types: names });
+    }
 
-        let set = this.fromImports.get(moduleName);
-        if (!set) {
-            set = new Set<string>();
-            this.fromImports.set(moduleName, set);
+    enterDecorated = (ctx: DecoratedContext) => {
+        const funcDef = ctx.funcdef() ?? ctx.async_funcdef().funcdef();
+        if (!funcDef) { return; }
+        const start = ctx.start.start;
+        const stop = ctx.stop?.stop ?? ctx.start.stop;
+        const decorators = ctx.decorators().decorator_list().map(c => c.dotted_name().name_list().map(n => n.getText()));
+        const name = funcDef.name().getText();
+        this.decoratedFunctions.push({
+            decorators,
+            name,
+            start,
+            stop,
+        })
+    }
+
+    isDbosWorkflow(func: DecoratedFunction, dbosModules: Set<string>, dbosTypes: Set<string>) {
+        for (const dec of func.decorators) {
+            if (dec.length === 3 && dbosModules.has(dec[0]) && dec[1] === "DBOS" && dec[2] === "workflow") {
+                return true;
+            }
+            if (dec.length === 2 && dbosTypes.has(dec[0]) && dec[1] === "workflow") {
+                return true;
+            }
         }
-        for (const name of names) {
-            set.add(composeAliasedName(name));
+        return false;
+    }
+}
+
+
+interface DbosWorkflowMethod {
+    name: string;
+    start: number;
+    end: number;
+}
+
+function* parsePython(input: string) {
+    const lexer = new Python3Lexer(new CharStream(input));
+    const parser = new Python3Parser(new CommonTokenStream(lexer));
+    const tree = parser.file_input();
+
+    const listener = new DbosPythonListener();
+    ParseTreeWalker.DEFAULT.walk(listener, tree);
+
+    const dbosModules = new Set<string>();
+    for (const { name, asName } of listener.nameImports) {
+        if (name.length === 1 && name[0] === 'dbos') {
+            dbosModules.add(asName ?? name[0])
         }
     }
 
-    visitDecorated =(ctx: DecoratedContext) => {
-        const func = ctx.funcdef() ?? ctx.async_funcdef().funcdef();
-        if (func) {
-            const start = ctx.start.start;
-            const stop = ctx.stop?.stop ?? ctx.start.stop;
-            const decorators = ctx.decorators().decorator_list().map(c => c.dotted_name().name_list().map(n => n.getText()).join('.'));
-            const name = func.name().getText();
-            this.decoratedFunctions.push({
-                decorators,
-                name,
-                start,
-                stop,
-            })
+    const dbosTypes = new Set<string>();
+    for (const { module, types } of listener.fromImports) {
+        if (module.length === 1 && module[0] === 'dbos') {
+            for (const {name, asName} of types) {
+                if (name.length === 1 && name[0] === 'DBOS') {
+                    dbosTypes.add(asName ?? name[0])
+                }
+            }
+        }
+    }
+
+    for (const func of listener.decoratedFunctions) {
+        if (listener.isDbosWorkflow(func, dbosModules, dbosTypes)) {
+            yield {name: func.name, start: func.start, end: func.stop } as DbosWorkflowMethod;
         }
     }
 }
@@ -84,38 +120,8 @@ class DbosPythonVisitor extends Python3ParserVisitor<void> {
 
 async function main(filename: string) {
     const input = await fs.readFile(filename, 'utf8');
-    const chars = new CharStream(input); // replace this with a FileStream as required
-    const lexer = new Python3Lexer(chars);
-    const tokens = new CommonTokenStream(lexer);
-    const parser = new Python3Parser(tokens);
-    const tree = parser.file_input()
-
-    const visitor = new DbosPythonVisitor();
-    visitor.visit(tree);
-    
-    for (const n of visitor.nameImports) {
-        console.log(`import: ${asAliasedName(n)}`);
-    }
-    for (const [module, types] of visitor.fromImports) {
-        console.log(`import from: ${module}`);
-        for (const type of types) {
-            console.log(`\t${asAliasedName(parseAliasedName(type))}`);
-        }
-    }
-    for (const func of visitor.decoratedFunctions) {
-        console.log(`function ${func.name}`);
-        for (const dec of func.decorators) {
-            console.log(`\t${dec}`);
-        }
-
-    }
-
-    function asAliasedName({ name, asName }: AliasedName) {
-        if (asName) {
-            return `${name} as ${asName}`;
-        }
-        return name;
-
+    for (const func of parsePython(input)) {
+        console.log(func);
     }
 }
 
