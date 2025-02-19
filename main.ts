@@ -1,12 +1,9 @@
-import { CharStream, CommonTokenStream, ParseTreeWalker  } from 'antlr4';
+import { CharStream, CommonTokenStream, ParseTreeWalker } from 'antlr4';
 import Python3Lexer from './Python3Lexer';
 import Python3Parser, { DecoratedContext, Import_fromContext, Import_nameContext } from './Python3Parser';
 import * as fs from 'node:fs/promises';
 // import Python3ParserVisitor from './Python3ParserVisitor';
 import Python3ParserListener from './Python3ParserListener';
-import { start } from 'node:repl';
-import { triggerAsyncId } from 'node:async_hooks';
-import { link } from 'node:fs';
 
 type AliasedName = {
     name: readonly string[];
@@ -64,16 +61,42 @@ class DbosPythonListener extends Python3ParserListener {
         })
     }
 
-    isDbosWorkflow(func: DecoratedFunction, dbosModules: Set<string>, dbosTypes: Set<string>) {
-        for (const dec of func.decorators) {
-            if (dec.length === 3 && dbosModules.has(dec[0]) && dec[1] === "DBOS" && dec[2] === "workflow") {
-                return true;
-            }
-            if (dec.length === 2 && dbosTypes.has(dec[0]) && dec[1] === "workflow") {
-                return true;
+    *getWorkflowMethods() {
+        const dbosModules = new Set<string>();
+        for (const { name, asName } of this.nameImports) {
+            if (name.length === 1 && name[0] === 'dbos') {
+                dbosModules.add(asName ?? name[0])
             }
         }
-        return false;
+
+        const dbosTypes = new Set<string>();
+        for (const { module, types } of this.fromImports) {
+            if (module.length === 1 && module[0] === 'dbos') {
+                for (const { name, asName } of types) {
+                    if (name.length === 1 && name[0] === 'DBOS') {
+                        dbosTypes.add(asName ?? name[0])
+                    }
+                }
+            }
+        }
+
+        for (const func of this.decoratedFunctions) {
+            if (isDbosWorkflow(func, dbosModules, dbosTypes)) {
+                yield func;
+            }
+        }
+
+        function isDbosWorkflow(func: DecoratedFunction, dbosModules: Set<string>, dbosTypes: Set<string>) {
+            for (const dec of func.decorators) {
+                if (dec.length === 3 && dbosModules.has(dec[0]) && dec[1] === "DBOS" && dec[2] === "workflow") {
+                    return true;
+                }
+                if (dec.length === 2 && dbosTypes.has(dec[0]) && dec[1] === "workflow") {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 }
 
@@ -92,31 +115,10 @@ function* parsePython(input: string) {
     const listener = new DbosPythonListener();
     ParseTreeWalker.DEFAULT.walk(listener, tree);
 
-    const dbosModules = new Set<string>();
-    for (const { name, asName } of listener.nameImports) {
-        if (name.length === 1 && name[0] === 'dbos') {
-            dbosModules.add(asName ?? name[0])
-        }
-    }
-
-    const dbosTypes = new Set<string>();
-    for (const { module, types } of listener.fromImports) {
-        if (module.length === 1 && module[0] === 'dbos') {
-            for (const {name, asName} of types) {
-                if (name.length === 1 && name[0] === 'DBOS') {
-                    dbosTypes.add(asName ?? name[0])
-                }
-            }
-        }
-    }
-
-    for (const func of listener.decoratedFunctions) {
-        if (listener.isDbosWorkflow(func, dbosModules, dbosTypes)) {
-            yield {name: func.name, start: func.start, end: func.stop } as DbosWorkflowMethod;
-        }
+    for (const func of listener.getWorkflowMethods()) {
+        yield { name: func.name, start: func.start, end: func.stop } as DbosWorkflowMethod;
     }
 }
-
 
 async function main(filename: string) {
     const input = await fs.readFile(filename, 'utf8');

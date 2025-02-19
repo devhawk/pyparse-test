@@ -1,13 +1,18 @@
 {
-  "compilerOptions": {
-    "lib": ["es2021"],
-    "target": "ES2021",
-    "module": "commonjs",
-    "esModuleInterop": true,
-    "strict": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
+	"compilerOptions": {
+		"module": "CommonJS",
+		"target": "ES2022",
     "outDir": "./dist",
-    "sourceMap": true
-  }
+		"lib": [
+			"ES2022"
+		],
+		"sourceMap": true,
+		// "rootDir": "src",
+		"strict": true,
+		"alwaysStrict": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		// "noUnusedParameters": true,
+		"esModuleInterop": true,
+	}
 }
